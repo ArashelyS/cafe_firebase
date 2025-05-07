@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gestión de Tickets - Exportación de Café</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body { background-color: #f0efe9; font-family: Arial, sans-serif; }
+    .card-ticket { background-color: #fffbe7; border-left: 5px solid #8b5e3c; }
+    .priority-alta { border-color: red !important; }
+    .priority-media { border-color: orange !important; }
+    .priority-baja { border-color: green !important; }
+  </style>
+</head>
+<body class="container py-4">
+
+  <h1 class="text-center mb-4">Gestión de Tickets - Exportación de Café</h1>
+
+  <!-- Sección de Login y Registro -->
+  <div id="auth-section">
+    <!-- Login / Registro -->
+    <div id="login-form">
+      <h3>Iniciar Sesión</h3>
+      <input type="email" id="login-email" placeholder="Correo" class="form-control mb-2">
+      <input type="password" id="login-password" placeholder="Contraseña" class="form-control mb-2">
+      <button class="btn btn-success w-100" id="login-btn">Iniciar Sesión</button>
+      <button class="btn btn-link" id="reset-btn">¿Olvidaste tu contraseña?</button>
+    </div>
+    <div id="register-form" class="mt-4">
+      <h3>Registrarse</h3>
+      <input type="email" id="register-email" placeholder="Correo" class="form-control mb-2">
+      <input type="password" id="register-password" placeholder="Contraseña" class="form-control mb-2">
+      <button class="btn btn-primary w-100" id="register-btn">Registrarse</button>
+    </div>
+  </div>
+
+  <!-- Sección de App Principal -->
+  <div id="main-app" style="display: none;">
+    <h2>Crear Ticket</h2>
+    <form id="ticket-form">
+      <input type="text" id="cliente" placeholder="Nombre del Cliente" class="form-control mb-2">
+      <input type="text" id="pais" placeholder="País de Procedencia" class="form-control mb-2">
+      <input type="number" id="kilos" placeholder="Kilogramos" class="form-control mb-2">
+      <input type="text" id="producto" placeholder="Tipo de Producto" class="form-control mb-2">
+      <textarea id="descripcion" placeholder="Descripción del Pedido" class="form-control mb-2"></textarea>
+      <select id="prioridad" class="form-control mb-2">
+        <option value="alta">Alta</option>
+        <option value="media">Media</option>
+        <option value="baja">Baja</option>
+      </select>
+      <button class="btn btn-success w-100" type="submit">Crear Ticket</button>
+    </form>
+
+    <hr>
+    <div class="d-flex justify-content-between align-items-center">
+      <h3>Tickets</h3>
+      <div>
+        <select id="filtro-prioridad" class="form-select">
+          <option value="">Filtrar por Prioridad</option>
+          <option value="alta">Alta</option>
+          <option value="media">Media</option>
+          <option value="baja">Baja</option>
+        </select>
+      </div>
+    </div>
+    <div id="tickets-list" class="row mt-3"></div>
+    <button class="btn btn-warning mt-3" onclick="exportToExcel()">Exportar Todos a Excel</button>
+
+    <hr>
+    <h3>Estadísticas por Prioridad</h3>
+    <canvas id="priority-chart"></canvas>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, addDoc, getDocs, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDzaD2DX10i0Uz-TbCiJ-6VoCDpnSTnXPs",
+      authDomain: "practica-firebase-40a73.firebaseapp.com",
+      projectId: "practica-firebase-40a73",
+      storageBucket: "practica-firebase-40a73.appspot.com",
+      messagingSenderId: "9786227431",
+      appId: "1:9786227431:web:0d86ced1a9c77bb88d8042"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth();
+    const db = getFirestore();
+
+    document.getElementById('login-btn').addEventListener('click', async () => {
+      const email = document.getElementById('login-email').value;
+      const password = document.getElementById('login-password').value;
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+        alert('Inicio de sesión exitoso');
+      } catch (e) {
+        alert('Error en login: ' + e.message);
+      }
+    });
+
+    document.getElementById('register-btn').addEventListener('click', async () => {
+      const email = document.getElementById('register-email').value;
+      const password = document.getElementById('register-password').value;
+      try {
+        await createUserWithEmailAndPassword(auth, email, password);
+        alert('Usuario registrado');
+      } catch (e) {
+        alert('Error en registro: ' + e.message);
+      }
+    });
+
+    document.getElementById('reset-btn').addEventListener('click', async () => {
+      const email = document.getElementById('login-email').value;
+      try {
+        await sendPasswordResetEmail(auth, email);
+        alert('Correo de recuperación enviado');
+      } catch (e) {
+        alert('Error al enviar recuperación: ' + e.message);
+      }
+    });
+
+    let allTickets = [];
+    const renderTickets = (tickets) => {
+      const filtro = document.getElementById('filtro-prioridad').value;
+      const list = document.getElementById('tickets-list');
+      list.innerHTML = '';
+      const counts = { alta: 0, media: 0, baja: 0 };
+
+      tickets.filter(t => !filtro || t.prioridad === filtro).forEach(ticket => {
+        const div = document.createElement('div');
+        div.className = `col-md-4 card p-3 mb-3 card-ticket priority-${ticket.prioridad}`;
+        div.innerHTML = `
+          <h5>Folio: ${ticket.folio}</h5>
+          <p><strong>Cliente:</strong> ${ticket.cliente}</p>
+          <p><strong>País:</strong> ${ticket.pais}</p>
+          <p><strong>Producto:</strong> ${ticket.producto}</p>
+          <p><strong>Kilos:</strong> ${ticket.kilos}</p>
+          <p><strong>Prioridad:</strong> ${ticket.prioridad}</p>
+          <p><strong>Descripción:</strong> ${ticket.descripcion}</p>
+          <button class="btn btn-outline-danger btn-sm" onclick="window.exportTicketPDF('${ticket.folio}')">Exportar PDF</button>
+        `;
+        list.appendChild(div);
+        counts[ticket.prioridad]++;
+      });
+
+      drawChart(counts);
+    };
+
+    let chartInstance;
+    const drawChart = (counts) => {
+      const ctx = document.getElementById('priority-chart').getContext('2d');
+      if (chartInstance) chartInstance.destroy();
+      chartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Alta', 'Media', 'Baja'],
+          datasets: [{
+            label: 'Tickets por Prioridad',
+            data: [counts.alta, counts.media, counts.baja],
+            backgroundColor: ['red', 'orange', 'green']
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } }
+        }
+      });
+    };
+
+    const createTicket = async (e) => {
+      e.preventDefault();
+      const folio = 'F-' + Date.now();
+      const ticket = {
+        folio,
+        cliente: document.getElementById('cliente').value,
+        pais: document.getElementById('pais').value,
+        kilos: document.getElementById('kilos').value,
+        producto: document.getElementById('producto').value,
+        descripcion: document.getElementById('descripcion').value,
+        prioridad: document.getElementById('prioridad').value
+      };
+      await addDoc(collection(db, 'tickets'), ticket);
+      document.getElementById('ticket-form').reset();
+    };
+
+    document.getElementById('ticket-form').addEventListener('submit', createTicket);
+    document.getElementById('filtro-prioridad').addEventListener('change', () => renderTickets(allTickets));
+
+    window.exportToExcel = async () => {
+      const querySnapshot = await getDocs(collection(db, 'tickets'));
+      let csvContent = 'Folio,Cliente,País,Kilos,Producto,Prioridad,Descripción\n';
+      querySnapshot.forEach(doc => {
+        const t = doc.data();
+        csvContent += `${t.folio},${t.cliente},${t.pais},${t.kilos},${t.producto},${t.prioridad},${t.descripcion}\n`;
+      });
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'tickets_exportacion_cafe.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    };
+
+    window.exportTicketPDF = async (folio) => {
+      const querySnapshot = await getDocs(collection(db, 'tickets'));
+      const ticket = querySnapshot.docs.map(doc => doc.data()).find(t => t.folio === folio);
+      if (!ticket) return alert('Ticket no encontrado');
+
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      doc.setFontSize(14);
+      doc.text("Ticket de Exportación de Café", 20, 20);
+      doc.setFontSize(12);
+      doc.text(`Folio: ${ticket.folio}`, 20, 30);
+      doc.text(`Cliente: ${ticket.cliente}`, 20, 40);
+      doc.text(`País: ${ticket.pais}`, 20, 50);
+      doc.text(`Producto: ${ticket.producto}`, 20, 60);
+      doc.text(`Kilos: ${ticket.kilos}`, 20, 70);
+      doc.text(`Prioridad: ${ticket.prioridad}`, 20, 80);
+      doc.text("Descripción:", 20, 90);
+      doc.text(ticket.descripcion, 20, 100);
+      doc.save(`ticket_${ticket.folio}.pdf`);
+    };
+
+    onAuthStateChanged(auth, user => {
+      if (user) {
+        document.getElementById('auth-section').style.display = 'none';
+        document.getElementById('main-app').style.display = 'block';
+        onSnapshot(collection(db, 'tickets'), snapshot => {
+          allTickets = snapshot.docs.map(doc => doc.data());
+          renderTickets(allTickets);
+        });
+      }
+    });
+  </script>
+</body>
+</html>
